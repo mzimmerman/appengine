@@ -29,8 +29,9 @@ import (
 // If opts is nil the default values are used.
 func NewInstance(opts *Options) (Instance, error) {
 	i := &instance{
-		opts:  opts,
-		appID: "testapp",
+		opts:    opts,
+		appID:   "testapp",
+		canWait: make(chan struct{}, 1), // set if Close() can Wait() on the process (no current reads)
 	}
 	if opts != nil && opts.AppID != "" {
 		i.appID = opts.AppID
@@ -55,6 +56,7 @@ type instance struct {
 	adminURL string   // base URL of admin HTTP server
 	appDir   string
 	appID    string
+	canWait  chan struct{}
 	relFuncs []func() // funcs to release any associated contexts
 }
 
@@ -95,6 +97,7 @@ func (i *instance) Close() (err error) {
 	if p := i.child.Process; p != nil {
 		errc := make(chan error, 1)
 		go func() {
+			<-i.canWait
 			errc <- i.child.Wait()
 		}()
 
@@ -238,6 +241,7 @@ func (i *instance) startChild() (err error) {
 				adminc <- string(match[1])
 			}
 		}
+		i.canWait <- struct{}{} // telling the Close() function can Wait for the process to die
 		if err = s.Err(); err != nil {
 			errc <- err
 		}
